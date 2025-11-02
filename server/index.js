@@ -4,7 +4,7 @@ import axios from "axios";
 import { XMLParser } from "fast-xml-parser";
 
 const app = express();
-const PORT = 3000;
+const PORT = 2000;
 
 // Function to fetch Google News RSS
 async function fetchNews(query) {
