@@ -8,7 +8,7 @@ const PORT = 2000;
 
 app.use(cors());
 
-// --- Helper: Format date safely ---
+// 🕒 Helper: Safely format publication date
 function formatDate(dateString) {
   if (!dateString) return null;
   const date = new Date(dateString);
@@ -22,7 +22,7 @@ function formatDate(dateString) {
   };
 }
 
-// --- Fetch news for a single query (e.g., “নির্বাচন 2023”) ---
+// 📰 Fetch news for one query (e.g., “AI 2023” or “নির্বাচন 2023”)
 async function fetchNews(query) {
   const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(
     query
@@ -58,7 +58,7 @@ async function fetchNews(query) {
   }
 }
 
-// --- Fetch for all years (2001–2025) ---
+// 🌍 Fetch across all years (2001–2025)
 async function fetchAllYears(baseQuery) {
   const YEARS = Array.from({ length: 25 }, (_, i) => 2025 - i); // 2025 → 2001
   let allResults = [];
@@ -68,11 +68,11 @@ async function fetchAllYears(baseQuery) {
     const results = await fetchNews(`${baseQuery} ${year}`);
     allResults = [...allResults, ...results];
 
-    // small delay to avoid throttling
+    // ⏳ Small delay to avoid throttling Google News
     await new Promise((r) => setTimeout(r, 1200));
   }
 
-  // Remove duplicates by link/title
+  // 🔁 Remove duplicates
   const unique = [];
   const seen = new Set();
   for (const item of allResults) {
@@ -83,16 +83,25 @@ async function fetchAllYears(baseQuery) {
     }
   }
 
-  // Sort descending by date
+  // 📅 Sort newest → oldest
   unique.sort((a, b) => new Date(b.isoDate) - new Date(a.isoDate));
 
   console.log(`✅ Total unique: ${unique.length} news articles`);
   return unique;
 }
 
-// --- Main API endpoint ---
+// 🚀 Main API endpoint
 app.get("/api/news", async (req, res) => {
-  const query = req.query.query || "নির্বাচন";
+  const query = req.query.query?.trim();
+
+  if (!query) {
+    // if no query provided, return 400
+    return res.status(400).json({
+      error: "Please provide a search term using '?query=' parameter.",
+      example: "/api/news?query=AI",
+    });
+  }
+
   console.log(`🔍 Aggregating Google News for: ${query}`);
 
   try {
@@ -109,6 +118,7 @@ app.get("/api/news", async (req, res) => {
   }
 });
 
+// 🖥️ Start the server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
