@@ -1,14 +1,11 @@
-// index.js (CommonJS)
-// Scrape ONE TheWall.in page and save full text (no images) to data/<slug>.json
+// scraper.js
+// Reusable function that scrapes ONE article URL and saves full text to /data/*.json
 
 const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const cheerio = require("cheerio");
 const slugify = require("slugify");
-
-const TARGET_URL =
-  "https://www.thewall.in/bangladesh/date-of-hasinas-sentence-will-pronouns-on-november-13-awami-league-calls-for-lockdown-in-dhaka/tid/177928";
 
 // ---------- helpers ----------
 const clean = (s) => (s ? s.replace(/\s+/g, " ").trim() : "");
@@ -18,12 +15,13 @@ function ensureDir(p) {
 }
 
 function safeFileName(str, fallback = "article") {
-  const a = slugify(str || "", { lower: true, strict: true, trim: true }) ||
-            slugify(fallback, { lower: true, strict: true });
+  const a =
+    slugify(str || "", { lower: true, strict: true, trim: true }) ||
+    slugify(fallback, { lower: true, strict: true });
   return a.replace(/^\.+/, "").slice(0, 120);
 }
 
-// Try multiple likely containers for the article body
+// likely content containers
 const BODY_SELECTORS = [
   "article .entry-content",
   "article .post-content",
@@ -33,11 +31,11 @@ const BODY_SELECTORS = [
   ".post-content",
   "article",
   ".content-area",
-  ".main-content"
+  ".main-content",
 ];
 
-(async function run() {
-  console.log("🔎 Fetching:", TARGET_URL);
+async function scrapeOne(TARGET_URL, outRoot = path.join(process.cwd(), "data")) {
+  if (!TARGET_URL) throw new Error("No URL provided");
 
   // 1) download
   let html;
@@ -47,14 +45,16 @@ const BODY_SELECTORS = [
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
       },
+      // If some sites block without referrer:
+      // headers: { Referer: new URL(TARGET_URL).origin, ... }
     });
     html = resp.data;
   } catch (err) {
-    console.error("❌ Failed to download page:", err.message);
-    process.exit(1);
+    throw new Error(`Download failed: ${err.message}`);
   }
 
   // 2) parse
@@ -88,21 +88,20 @@ const BODY_SELECTORS = [
   }
   if (!$body) $body = $("article").first(); // last fallback
 
-  // 4) extract full text: paragraphs + important subheadings
+  // 4) extract full text (subheadings + paragraphs)
   const blocks = [];
-  // include subheadings (keep simple text only)
+
   $body.find("h2, h3").each((_, el) => {
     const t = clean($(el).text());
     if (t) blocks.push(t);
   });
 
-  // include all paragraph text
   $body.find("p").each((_, el) => {
     const t = clean($(el).text());
     if (t) blocks.push(t);
   });
 
-  // if nothing found inside container, do a wide fallback (rare)
+  // wide fallback
   if (blocks.length === 0) {
     $("p").each((_, el) => {
       const t = clean($(el).text());
@@ -114,10 +113,9 @@ const BODY_SELECTORS = [
   const wordCount = text ? text.split(/\s+/).filter(Boolean).length : 0;
 
   // 5) save JSON
-  const outDir = path.join(process.cwd(), "data");
+  const outDir = path.join(outRoot);
   ensureDir(outDir);
 
-  // build a safe filename from title; fallback to last URL segment
   const lastSeg = new URL(TARGET_URL).pathname.split("/").filter(Boolean).pop();
   const fileStem = safeFileName(title, lastSeg || "article");
   const outPath = path.join(outDir, `${fileStem}.json`);
@@ -128,12 +126,18 @@ const BODY_SELECTORS = [
     author,
     publishedAt,
     wordCount,
-    paragraphs: blocks,     // array of blocks
-    text                    // full joined text
+    paragraphs: blocks,
+    text,
   };
 
   fs.writeFileSync(outPath, JSON.stringify(payload, null, 2), "utf-8");
 
-  console.log("✅ Saved:", outPath);
-  console.log("📝 paragraphs:", blocks.length, "| words:", wordCount);
-})();
+  return {
+    saved: true,
+    outPath,
+    meta: { title, author, publishedAt, words: wordCount },
+    payload,
+  };
+}
+
+module.exports = { scrapeOne };

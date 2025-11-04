@@ -1,341 +1,308 @@
-// App.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
-const API_BASE = "http://localhost:2000";
+const API = "http://localhost:2000";
 
-export default function App() {
-  const [query, setQuery] = useState("শেখ হাসিনা");
-  const [limit, setLimit] = useState(100);
-  const [concurrency, setConcurrency] = useState(6);
+function App() {
+  // Single scrape
+  const [oneUrl, setOneUrl] = useState("");
+  const [oneLoading, setOneLoading] = useState(false);
+  const [oneResult, setOneResult] = useState(null);
+  const [oneError, setOneError] = useState("");
 
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewItems, setPreviewItems] = useState([]);
-  const [previewCount, setPreviewCount] = useState(0);
+  // Batch scrape
+  const [batchText, setBatchText] = useState("");
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchResult, setBatchResult] = useState(null);
+  const [batchError, setBatchError] = useState("");
 
-  const [scrapeLoading, setScrapeLoading] = useState(false);
-  const [manifest, setManifest] = useState(null);
-  const [error, setError] = useState("");
+  const validBatchUrls = useMemo(() => {
+    return batchText
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }, [batchText]);
 
-  // compute simple source frequency for preview
-  const sourceCount = useMemo(() => {
-    const map = {};
-    for (const it of previewItems) {
-      const key = (it.source || "Unknown").trim();
-      map[key] = (map[key] || 0) + 1;
-    }
-    return map;
-  }, [previewItems]);
-
-  async function previewSearch(e) {
-    e?.preventDefault?.();
-    setError("");
-    setManifest(null);
-    setPreviewLoading(true);
+  const onScrapeOne = useCallback(async () => {
+    setOneError("");
+    setOneLoading(true);
+    setOneResult(null);
     try {
-      const r = await fetch(
-        `${API_BASE}/api/news?query=${encodeURIComponent(query)}`
-      );
-      if (!r.ok) throw new Error(`Preview failed: ${r.status}`);
-      const data = await r.json();
-      setPreviewItems(data.items || []);
-      setPreviewCount(data.count || 0);
-    } catch (err) {
-      setError(err.message || "Preview failed");
+      const u = new URL(`${API}/api/scrape-one`);
+      u.searchParams.set("url", oneUrl.trim());
+      const res = await fetch(u.toString());
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to scrape");
+      setOneResult(data); // { saved, outPath, meta, payload }
+    } catch (e) {
+      setOneError(e.message);
     } finally {
-      setPreviewLoading(false);
+      setOneLoading(false);
     }
-  }
+  }, [oneUrl]);
 
-  async function runFullScrape() {
-    setError("");
-    setManifest(null);
-    setScrapeLoading(true);
+  const onScrapeBatch = useCallback(async () => {
+    setBatchError("");
+    setBatchLoading(true);
+    setBatchResult(null);
     try {
-      const url = new URL(`${API_BASE}/api/news/full`);
-      url.searchParams.set("query", query);
-      if (Number(limit) > 0) url.searchParams.set("limit", String(limit));
-      url.searchParams.set("concurrency", String(concurrency));
-
-      const r = await fetch(url.toString(), { method: "GET" });
-      if (!r.ok) throw new Error(`Scrape failed: ${r.status}`);
-      const data = await r.json();
-      setManifest(data);
-    } catch (err) {
-      setError(err.message || "Scrape failed");
+      const res = await fetch(`${API}/api/scrape-batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls: validBatchUrls }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to scrape batch");
+      setBatchResult(data); // { files:[{url,title,words,outPath}], errors:[] ... }
+    } catch (e) {
+      setBatchError(e.message);
     } finally {
-      setScrapeLoading(false);
+      setBatchLoading(false);
     }
-  }
+  }, [validBatchUrls]);
 
-  useEffect(() => {
-    // optional: kick off a preview on mount
-    previewSearch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const downloadJSON = useCallback((obj, filename = "article.json") => {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="bg-white border-b">
-        <div className="max-w-6xl mx-auto px-4 py-6">
-          <h1 className="text-2xl md:text-3xl font-bold">
-            📰 Full News Scraper — Client
-          </h1>
-          <p className="text-sm text-gray-500">
-            Preview Google News → then run full scrape (resolve + extract full text).
-          </p>
-        </div>
-      </header>
+    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 py-10">
+      <div className="max-w-6xl mx-auto bg-white shadow-2xl rounded-2xl border border-gray-200 p-6 md:p-8">
+        <h1 className="text-3xl font-bold text-center text-blue-700 mb-2">
+          📰 Full-Text News Scraper (React)
+        </h1>
+        <p className="text-center text-gray-600 mb-8">
+          Backend: <code className="px-1 py-0.5 bg-gray-100 rounded">/api/scrape-one</code> &{" "}
+          <code className="px-1 py-0.5 bg-gray-100 rounded">/api/scrape-batch</code>
+        </p>
 
-      <main className="max-w-6xl mx-auto px-4 py-6 space-y-8">
-        {/* Controls */}
-        <section className="bg-white rounded-xl border p-4 md:p-6 shadow-sm">
-          <form
-            onSubmit={previewSearch}
-            className="flex flex-col md:flex-row gap-3 md:items-end"
-          >
-            <div className="flex-1">
-              <label className="block text-sm font-medium mb-1">Query</label>
-              <input
-                className="w-full border rounded-lg px-3 py-2"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="e.g. নির্বাচন, Bangladesh, AI..."
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">Limit</label>
-              <input
-                type="number"
-                min={0}
-                className="w-28 border rounded-lg px-3 py-2"
-                value={limit}
-                onChange={(e) => setLimit(Number(e.target.value))}
-                title="0 = no limit"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-1">
-                Concurrency
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={12}
-                className="w-28 border rounded-lg px-3 py-2"
-                value={concurrency}
-                onChange={(e) => setConcurrency(Number(e.target.value))}
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                type="submit"
-                disabled={previewLoading}
-                className={`px-4 py-2 rounded-lg font-medium ${
-                  previewLoading
-                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                    : "bg-blue-600 text-white hover:bg-blue-700"
-                }`}
-              >
-                {previewLoading ? "Loading…" : "Preview (RSS)"}
-              </button>
-
-              <button
-                type="button"
-                disabled={scrapeLoading || !previewItems.length}
-                onClick={runFullScrape}
-                className={`px-4 py-2 rounded-lg font-medium ${
-                  scrapeLoading || !previewItems.length
-                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
-                    : "bg-emerald-600 text-white hover:bg-emerald-700"
-                }`}
-                title={
-                  !previewItems.length
-                    ? "Run a preview first (or you can still run scrape without preview via the server)"
-                    : "Run full scrape"
-                }
-              >
-                {scrapeLoading ? "Scraping…" : "Run Full Scrape"}
-              </button>
-            </div>
-          </form>
-
-          {error ? (
-            <p className="mt-3 text-sm text-red-600">⚠️ {error}</p>
-          ) : null}
-        </section>
-
-        {/* Preview summary */}
-        <section className="bg-white rounded-xl border p-4 md:p-6 shadow-sm">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-lg font-semibold">Preview Results</h2>
-            <p className="text-sm text-gray-500">
-              Found <span className="font-semibold">{previewCount}</span> items
-              (showing {previewItems.length})
-            </p>
+        {/* Single URL */}
+        <section className="mb-10">
+          <h2 className="text-xl font-semibold mb-3">1) Scrape one URL</h2>
+          <div className="flex flex-col md:flex-row gap-3">
+            <input
+              className="flex-1 border border-gray-300 rounded-lg px-4 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+              type="url"
+              placeholder="Paste a news article URL…"
+              value={oneUrl}
+              onChange={(e) => setOneUrl(e.target.value)}
+            />
+            <button
+              onClick={onScrapeOne}
+              disabled={!oneUrl.trim() || oneLoading}
+              className={`px-5 py-2 rounded-lg font-medium text-white ${
+                oneLoading || !oneUrl.trim()
+                  ? "bg-blue-300 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700"
+              }`}
+            >
+              {oneLoading ? "Scraping…" : "Scrape"}
+            </button>
           </div>
 
-          {!previewItems.length ? (
-            <p className="text-sm text-gray-500 mt-2">
-              No preview yet. Enter a query and click <b>Preview (RSS)</b>.
-            </p>
-          ) : (
-            <>
-              {/* quick source chips */}
-              <div className="mt-3 flex flex-wrap gap-2">
-                {Object.entries(sourceCount)
-                  .sort((a, b) => b[1] - a[1])
-                  .slice(0, 12)
-                  .map(([src, n]) => (
-                    <span
-                      key={src}
-                      className="text-xs bg-gray-100 border rounded-full px-2 py-1"
-                      title={`${n} articles`}
-                    >
-                      {src} • {n}
-                    </span>
-                  ))}
-              </div>
-
-              {/* list */}
-              <ul className="mt-4 divide-y">
-                {previewItems.slice(0, 50).map((it, idx) => (
-                  <li key={`${it.link}-${idx}`} className="py-3">
-                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2">
-                      <div className="min-w-0">
-                        <a
-                          href={it.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-blue-700 hover:underline font-medium"
-                          title="Google News redirect link"
-                        >
-                          {idx + 1}. {it.title}
-                        </a>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {it.day && it.month && it.year
-                            ? `${it.day} ${it.month}, ${it.year}`
-                            : ""}
-                        </div>
-                      </div>
-                      <div className="text-xs md:text-right text-gray-600 shrink-0">
-                        <div className="font-semibold">
-                          {it.source || "Unknown"}
-                        </div>
-                        <div className="text-gray-400">
-                          ({sourceCount[it.source || "Unknown"] || 1}×)
-                        </div>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-
-              {previewItems.length > 50 && (
-                <p className="text-xs text-gray-500 mt-2">
-                  Showing first 50 items in UI. Full list still available via
-                  API.
-                </p>
-              )}
-            </>
+          {oneError && (
+            <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded p-3">
+              {oneError}
+            </div>
           )}
-        </section>
 
-        {/* Manifest (results from /api/news/full) */}
-        <section className="bg-white rounded-xl border p-4 md:p-6 shadow-sm">
-          <h2 className="text-lg font-semibold">Scrape Manifest</h2>
-          {!manifest ? (
-            <p className="text-sm text-gray-500 mt-2">
-              Run <b>Full Scrape</b> to get saved files & stats.
-            </p>
-          ) : (
-            <>
-              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                <div className="p-3 rounded-lg border bg-gray-50">
-                  <div className="text-gray-500">Requested</div>
-                  <div className="text-lg font-semibold">{manifest.requested}</div>
+          {oneResult && (
+            <div className="mt-6 border border-gray-200 rounded-xl p-4">
+              <div className="flex justify-between items-start gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-800">
+                    {oneResult?.payload?.title || oneResult?.meta?.title || "Untitled"}
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    {oneResult?.payload?.author || oneResult?.meta?.author || "Unknown author"}
+                    {" · "}
+                    {oneResult?.payload?.publishedAt ||
+                      oneResult?.meta?.publishedAt ||
+                      "Unknown date"}
+                    {" · "}
+                    {oneResult?.meta?.words ?? oneResult?.payload?.wordCount ?? 0} words
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1 break-all">
+                    Saved: {oneResult?.outPath}
+                  </p>
                 </div>
-                <div className="p-3 rounded-lg border bg-gray-50">
-                  <div className="text-gray-500">Saved</div>
-                  <div className="text-lg font-semibold">{manifest.saved}</div>
-                </div>
-                <div className="p-3 rounded-lg border bg-gray-50">
-                  <div className="text-gray-500">Failed</div>
-                  <div className="text-lg font-semibold">{manifest.failed}</div>
-                </div>
-                <div className="p-3 rounded-lg border bg-gray-50">
-                  <div className="text-gray-500">Generated</div>
-                  <div className="text-xs">
-                    {new Date(manifest.generatedAt).toLocaleString()}
-                  </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() =>
+                      downloadJSON(
+                        oneResult.payload ?? oneResult,
+                        `${(oneResult?.payload?.title || "article").slice(0, 60)}.json`
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-sm"
+                  >
+                    Download JSON
+                  </button>
                 </div>
               </div>
 
-              {manifest.errors?.length ? (
-                <details className="mt-4">
-                  <summary className="cursor-pointer text-sm text-red-600">
-                    {manifest.errors.length} errors
-                  </summary>
-                  <ul className="mt-2 space-y-2 text-sm">
-                    {manifest.errors.slice(0, 20).map((e, i) => (
-                      <li key={i} className="p-2 bg-red-50 border rounded">
-                        <div className="font-medium">{e.title}</div>
-                        <div className="text-gray-600 break-all">{e.link}</div>
-                        <div className="text-red-700 mt-1">{e.msg}</div>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              ) : null}
+              <hr className="my-4" />
 
-              <h3 className="mt-6 font-semibold">Saved Files</h3>
-              {!manifest.files?.length ? (
-                <p className="text-sm text-gray-500 mt-1">No files saved.</p>
-              ) : (
-                <ul className="mt-2 divide-y">
-                  {manifest.files.slice(0, 100).map((f, i) => (
-                    <li key={i} className="py-3">
-                      <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="font-medium">{f.title}</div>
-                          <div className="text-xs text-gray-500 mt-1">
-                            {f.pubDate ? new Date(f.pubDate).toLocaleString() : ""}
-                            {f.source ? ` • ${f.source}` : ""}
-                            {typeof f.words === "number" ? ` • ${f.words} words` : ""}
-                          </div>
-                          <div className="text-xs text-gray-500 break-all">
-                            Saved: <code>{f.outPath}</code>
-                          </div>
-                        </div>
-                        <a
-                          href={f.finalUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs px-3 py-1.5 border rounded-lg hover:bg-gray-50"
-                        >
-                          Open Source
-                        </a>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {manifest.files?.length > 100 && (
-                <p className="text-xs text-gray-500 mt-2">
-                  Showing first 100 saved items.
-                </p>
-              )}
-            </>
+              <ArticlePreview text={oneResult?.payload?.text} paragraphs={oneResult?.payload?.paragraphs} />
+            </div>
           )}
         </section>
-      </main>
 
-      <footer className="py-8 text-center text-xs text-gray-400">
-        © {new Date().getFullYear()} Full News Scraper
+        <hr className="my-8" />
+
+        {/* Batch URLs */}
+        <section>
+          <h2 className="text-xl font-semibold mb-3">2) Scrape a batch (one URL per line)</h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <textarea
+              className="border border-gray-300 rounded-lg px-4 py-2 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 min-h-[160px]"
+              placeholder={"https://news-site.com/article-1\nhttps://another.com/news/abc\n..."}
+              value={batchText}
+              onChange={(e) => setBatchText(e.target.value)}
+            />
+            <div className="flex flex-col justify-between gap-3">
+              <div className="text-sm text-gray-600">
+                <div>Detected URLs: <b>{validBatchUrls.length}</b></div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Tip: paste links from Google News results after resolving to the real publisher URL.
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={onScrapeBatch}
+                  disabled={batchLoading || validBatchUrls.length === 0}
+                  className={`px-5 py-2 rounded-lg font-medium text-white ${
+                    batchLoading || validBatchUrls.length === 0
+                      ? "bg-emerald-300 cursor-not-allowed"
+                      : "bg-emerald-600 hover:bg-emerald-700"
+                  }`}
+                >
+                  {batchLoading ? "Scraping…" : "Scrape Batch"}
+                </button>
+                <button
+                  onClick={() => {
+                    setBatchText("");
+                    setBatchResult(null);
+                    setBatchError("");
+                  }}
+                  className="px-5 py-2 rounded-lg border border-gray-300 hover:bg-gray-50 font-medium"
+                >
+                  Reset
+                </button>
+              </div>
+              {batchError && (
+                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-3">
+                  {batchError}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {batchResult && (
+            <div className="mt-6">
+              <BatchSummary data={batchResult} />
+            </div>
+          )}
+        </section>
+      </div>
+
+      <footer className="text-center text-sm text-gray-500 mt-8">
+        © {new Date().getFullYear()} Full-Text Scraper UI — React + Tailwind
       </footer>
     </div>
   );
 }
+
+function ArticlePreview({ text, paragraphs }) {
+  const blocks = useMemo(() => {
+    if (Array.isArray(paragraphs) && paragraphs.length > 0) return paragraphs;
+    if (typeof text === "string" && text.trim()) return text.split(/\n{2,}/);
+    return [];
+  }, [text, paragraphs]);
+
+  if (!blocks.length) {
+    return <p className="text-gray-500 italic">No text extracted.</p>;
+  }
+
+  return (
+    <div className="space-y-3 max-h-[420px] overflow-auto pr-2">
+      {blocks.map((p, idx) => (
+        <p key={idx} className="leading-7 text-gray-800">
+          {p}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function BatchSummary({ data }) {
+  const { requested, saved, failed, files = [], errors = [], outDir } = data;
+
+  return (
+    <div className="border border-gray-200 rounded-xl p-4">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="px-2 py-1 rounded bg-gray-100">Requested: {requested}</span>
+        <span className="px-2 py-1 rounded bg-emerald-100 text-emerald-700">Saved: {saved}</span>
+        <span className="px-2 py-1 rounded bg-red-100 text-red-700">Failed: {failed}</span>
+        <span className="px-2 py-1 rounded bg-gray-100">Out dir: {outDir}</span>
+      </div>
+
+      {!!files.length && (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-600 border-b">
+                <th className="py-2 pr-4">#</th>
+                <th className="py-2 pr-4">Title</th>
+                <th className="py-2 pr-4">Words</th>
+                <th className="py-2 pr-4">File</th>
+                <th className="py-2 pr-4">URL</th>
+              </tr>
+            </thead>
+            <tbody>
+              {files.map((f, i) => (
+                <tr key={i} className="border-b last:border-0">
+                  <td className="py-2 pr-4 text-gray-500">{i + 1}</td>
+                  <td className="py-2 pr-4">{f.title || "Untitled"}</td>
+                  <td className="py-2 pr-4">{f.words ?? 0}</td>
+                  <td className="py-2 pr-4 text-xs text-gray-500 break-all">{f.outPath}</td>
+                  <td className="py-2 pr-4 text-xs text-blue-700 break-all">
+                    <a href={f.url} target="_blank" rel="noreferrer" className="hover:underline">
+                      {f.url}
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-xs text-gray-400 mt-2">
+            Open a saved file from disk if you serve the <code>/data</code> folder statically, or just
+            scrape the URL again with “Scrape one” to preview and download the JSON directly.
+          </p>
+        </div>
+      )}
+
+      {!!errors.length && (
+        <div className="mt-4">
+          <h4 className="font-semibold mb-1">Errors</h4>
+          <ul className="list-disc list-inside text-sm text-red-600">
+            {errors.map((e, i) => (
+              <li key={i}>
+                <span className="text-gray-700">{e.url}</span> — {e.error}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;
